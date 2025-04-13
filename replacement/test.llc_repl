@@ -1,0 +1,167 @@
+#include "cache.h"
+
+// Initialize replacement state
+void CACHE::llc_initialize_replacement()
+{
+    cout << NAME << " has LRU replacement policy with way partitioning for 2 CPUs" << endl;
+    uint32_t middle = NUM_WAY / 2;
+    for (uint32_t set = 0; set < NUM_SET; set++) {
+        // Initialize CPU 0 partition: ways 0 to middle-1
+        for (uint32_t way = 0; way < middle; way++) {
+            block[set][way].lru = way;
+        }
+        // Initialize CPU 1 partition: ways middle to NUM_WAY-1
+        for (uint32_t way = middle; way < NUM_WAY; way++) {
+            block[set][way].lru = way - middle;
+        }
+    }
+}
+
+// Find replacement victim
+uint32_t CACHE::llc_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    // Baseline LRU with partitioning
+    return lru_victim_task1(cpu, instr_id, set, current_set, ip, full_addr, type);
+}
+
+uint32_t CACHE::lru_victim_task1(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    uint32_t way = 0;
+    uint32_t middle = NUM_WAY / 2;
+
+    if (cpu == 0)
+    {
+        // Fill invalid line first in CPU 0's partition
+        for (way = 0; way < middle; way++)
+        {
+            if (block[set][way].valid == false)
+            {
+                //cout << "Hello from invalid" << endl;
+                DP(if (warmup_complete[cpu]) {
+                    cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " invalid set: " << set << " way: " << way;
+                    cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                    cout << dec << " lru: " << block[set][way].lru << endl;
+                });
+                break;
+            }
+        }
+
+        // LRU victim in CPU 0's partition
+        if (way == middle)
+        {
+            for (way = 0; way < middle; way++)
+            {
+                if (block[set][way].lru == middle - 1)
+                {
+                    //cout << "Hello from LRU victim" << endl;
+                    DP(if (warmup_complete[cpu]) {
+                        cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " replace set: " << set << " way: " << way;
+                        cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                        cout << dec << " lru: " << block[set][way].lru << endl;
+                    });
+                    break;
+                }
+            }
+        }
+
+        if (way == middle)
+        {
+            cerr << "[" << NAME << "] " << __func__ << " no victim! set: " << set << endl;
+            assert(0);
+        }
+    }
+    else  // cpu == 1
+    {
+        // Fill invalid line first in CPU 1's partition
+        for (way = middle; way < NUM_WAY; way++)
+        {
+            if (block[set][way].valid == false)
+            {
+                DP(if (warmup_complete[cpu]) {
+                    cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " invalid set: " << set << " way: " << way;
+                    cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                    cout << dec << " lru: " << block[set][way].lru << endl;
+                });
+                break;
+            }
+        }
+
+        // LRU victim in CPU 1's partition
+        if (way == NUM_WAY)
+        {
+            for (way = middle; way < NUM_WAY; way++)
+            {
+                if (block[set][way].lru == middle - 1)
+                {
+                    DP(if (warmup_complete[cpu]) {
+                        cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " replace set: " << set << " way: " << way;
+                        cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                        cout << dec << " lru: " << block[set][way].lru << endl;
+                    });
+                    break;
+                }
+            }
+        }
+
+        if (way == NUM_WAY)
+        {
+            cerr << "[" << NAME << "] " << __func__ << " no victim! set: " << set << endl;
+            assert(0);
+        }
+    }
+
+    int cpuId = block[set][way].cpu;
+    if(cpuId == cpu){
+        self_eviction[cpu]++;
+    }
+    //cout << "CPU: " << cpu << " way: " << way << endl;
+    return way;
+}
+
+// Called on every cache hit and cache fill
+void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit)
+{
+    if ((type == WRITEBACK) && ip)
+        assert(0);
+
+    // Baseline LRU with partitioning
+    if (hit && (type == WRITEBACK)) // Writeback hit does not update LRU state
+        return;
+
+    lru_update_task1(cpu, set, way);
+}
+
+void CACHE::lru_update_task1(uint32_t cpu, uint32_t set, uint32_t way)
+{
+    uint32_t middle = NUM_WAY / 2;
+    if (cpu == 0)
+    {
+        // Update LRU for CPU 0's partition: ways 0 to middle-1
+        for (uint32_t i = 0; i < middle; i++)
+        {
+            if (block[set][i].lru < block[set][way].lru)
+            {
+                block[set][i].lru++;
+            }
+        }
+        block[set][way].lru = 0; // Promote to MRU for CPU 0
+    }
+    else
+    {
+        // Update LRU for CPU 1's partition: ways middle to NUM_WAY-1
+        for (uint32_t i = middle; i < NUM_WAY; i++)
+        {
+            if (block[set][i].lru < block[set][way].lru)
+            {
+                block[set][i].lru++;
+            }
+        }
+        block[set][way].lru = 0; // Promote to MRU for CPU 1
+    }
+
+    //cout << "Update " << "CPU: " << cpu << " way: " << way << endl;
+}
+
+void CACHE::llc_replacement_final_stats()
+{
+}

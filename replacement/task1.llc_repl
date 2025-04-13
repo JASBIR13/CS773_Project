@@ -1,0 +1,150 @@
+#include "cache.h"
+
+// initialize replacement state
+void CACHE::llc_initialize_replacement()
+{
+    cout << NAME << " has LRU replacement policy" << endl;
+}
+
+// find replacement victim
+uint32_t CACHE::llc_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    // baseline LRU
+    return lru_victim_task1(cpu, instr_id, set, current_set, ip, full_addr, type);
+}
+
+uint32_t CACHE::lru_victim_task1(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    uint32_t way = 0;
+    uint32_t middle = (NUM_WAY) / 2;
+
+    if (cpu == 0)
+    {
+        // fill invalid line first
+        for (way = 0; way < middle; way++)
+        {
+            if (block[set][way].valid == false)
+            {
+                //cout << "Hello from invalid" << endl;
+                DP(if (warmup_complete[cpu]) {
+            cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " invalid set: " << set << " way: " << way;
+            cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+            cout << dec << " lru: " << block[set][way].lru << endl; });
+
+                break;
+            }
+        }
+
+        // LRU victim
+        if (way == middle)
+        {
+            for (way = 0; way < middle; way++)
+            {
+                if (block[set][way].lru == middle - 1)
+                {
+                    //cout << "Hello from LRU victim" << endl;
+
+                    DP(if (warmup_complete[cpu]) {
+                cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " replace set: " << set << " way: " << way;
+                cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                cout << dec << " lru: " << block[set][way].lru << endl; });
+
+                    break;
+                }
+            }
+        }
+
+        if (way == middle)
+        {
+            cerr << "[" << NAME << "] " << __func__ << " no victim! set: " << set << endl;
+            assert(0);
+        }
+    }
+    else
+    {
+        // fill invalid line first
+        for (way = middle; way < NUM_WAY; way++)
+        {
+            if (block[set][way].valid == false)
+            {
+
+                DP(if (warmup_complete[cpu]) {
+            cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " invalid set: " << set << " way: " << way;
+            cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+            cout << dec << " lru: " << block[set][way].lru << endl; });
+
+                break;
+            }
+        }
+
+        // LRU victim
+        if (way == NUM_WAY)
+        {
+            for (way = middle; way < NUM_WAY; way++)
+            {
+                if (block[set][way].lru == NUM_WAY - 1)
+                {
+
+                    DP(if (warmup_complete[cpu]) {
+                cout << "[" << NAME << "] " << __func__ << " instr_id: " << instr_id << " replace set: " << set << " way: " << way;
+                cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data;
+                cout << dec << " lru: " << block[set][way].lru << endl; });
+
+                    break;
+                }
+            }
+        }
+
+        if (way == NUM_WAY)
+        {
+            cerr << "[" << NAME << "] " << __func__ << " no victim! set: " << set << endl;
+            assert(0);
+        }
+    }
+    //cout << hex << " address: " << (full_addr>>LOG2_BLOCK_SIZE) << " victim address: " << block[set][way].address << " data: " << block[set][way].data<< endl;
+    //cout << "CPU: " << cpu << " way: " << way << endl;
+
+    return way;
+}
+
+// called on every cache hit and cache fill
+void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit)
+{
+
+    if ((type == WRITEBACK) && ip)
+        assert(0);
+
+    // uncomment this line to see the LLC accesses
+        // cout << "CPU: " << cpu << " set: " << setw(5) << set << " way: " << setw(2) << way << endl;
+    // cout << hex << " paddr: " << setw(12) << paddr << " ip: " << setw(8) << ip << " victim_addr: " << victim_addr << dec << endl;
+
+    // baseline LRU
+    if (hit && (type == WRITEBACK)) // writeback hit does not update LRU state
+        return;
+
+    return lru_update_task1(cpu,set, way);
+}
+
+void CACHE::lru_update_task1(uint32_t cpu, uint32_t set, uint32_t way)
+{
+    // update lru replacement state
+    if(cpu == 0){
+        for (uint32_t i=0; i<NUM_WAY/2; i++) {
+            if (block[set][i].lru < block[set][way].lru) {
+                block[set][i].lru++;
+            }
+        }
+        block[set][way].lru = 0; // promote to the MRU position
+    }else{
+        for (uint32_t i=NUM_WAY/2; i<NUM_WAY; i++) {
+            if (block[set][i].lru < block[set][way].lru) {
+                block[set][i].lru++;
+            }
+        }
+        block[set][way].lru = NUM_WAY/2; // promote to the MRU position
+    }
+}
+
+void CACHE::llc_replacement_final_stats()
+{
+}
