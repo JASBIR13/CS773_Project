@@ -8,13 +8,14 @@
 // CACHE BLOCK
 class BLOCK {
   public:
+    bool first_access[2];
     uint8_t valid,
             prefetch,
             dirty,
             used,
 	    instruction,
 	    translation,
-        epoch_id; // CEASER
+        epoch_id;
 
     int delta,
         depth,
@@ -37,6 +38,8 @@ class BLOCK {
     uint32_t lru;
 
     BLOCK() {
+        first_access[0] = false;
+        first_access[1] = false;
         valid = 0;
         prefetch = 0;
         dirty = 0;

@@ -9,17 +9,18 @@
 #include <cmath>
 
 #include <iterator>
+
 int count = 0;
-uint32_t total_count = 0;        // Number of sets for CPU0
-uint32_t partition_size_cpu0 = 2048;    // Number of sets for CPU0
-uint32_t partition_size_cpu1 = 2048;    // Number of sets for CPU1
-uint32_t partition_start_cpu0 = 0;   // Starting set index for CPU0
-uint32_t partition_start_cpu1 = 2048;   // Starting set index for CPU1
-uint64_t last_update_cycle_cpu0; // Last cycle when partitions were updated
+uint32_t total_count = 0;             // Number of sets for CPU0
+uint32_t partition_size_cpu0 = 2048;  // Number of sets for CPU0
+uint32_t partition_size_cpu1 = 2048;  // Number of sets for CPU1
+uint32_t partition_start_cpu0 = 0;    // Starting set index for CPU0
+uint32_t partition_start_cpu1 = 2048; // Starting set index for CPU1
+uint64_t last_update_cycle_cpu0;      // Last cycle when partitions were updated
 uint64_t last_update_cycle_cpu1;
-std::vector<uint64_t> prev_accesses(2,0); // Previous access counts for miss rate calculation
-std::vector<uint64_t> prev_misses(2,0);   // Previous miss counts for miss rate calculation
-std::vector<uint64_t> prev_eviction(2,0);
+std::vector<uint64_t> prev_accesses(2, 0); // Previous access counts for miss rate calculation
+std::vector<uint64_t> prev_misses(2, 0);   // Previous miss counts for miss rate calculation
+std::vector<uint64_t> prev_eviction(2, 0);
 
 uint64_t l2pf_access = 0;
 uint8_t L2C_BYPASS_KNOB = 0; // Neelu: Set to 1: Bypass Instructions 2: Bypass Data 3: Bypass All
@@ -48,14 +49,32 @@ ostream &operator<<(ostream &os, const PACKET &packet)
     return os << " cpu: " << packet.cpu << " instr_id: " << packet.instr_id << " Translated: " << +packet.translated << " address: " << hex << packet.address << " full_addr: " << packet.full_addr << dec << " full_virtual_address: " << hex << packet.full_virtual_address << " full_physical_address: " << packet.full_physical_address << dec << "Type: " << +packet.type << " event_cycle: " << packet.event_cycle << " current_core_cycle: " << current_core_cycle[packet.cpu] << endl;
 };
 
+// void CACHE::initialize()
+// {
+//         partition_size_cpu0 = NUM_SET / 2;                   // Half sets to CPU0
+//         partition_size_cpu1 = NUM_SET - partition_size_cpu0; // Remaining to CPU1
+//         partition_start_cpu0 = 0;                            // CPU0 starts at set 0
+//         partition_start_cpu1 = partition_size_cpu0;          // CPU1 starts after CPU0
+//         last_update_cycle_cpu0 = 0;
+//         last_update_cycle_cpu1 = 0; // Initial update cycle
+//         prev_accesses.resize(2, 0); // Initialize for 2 CPUs
+//         prev_misses.resize(2, 0);
+//         prev_eviction.resize(2,0);
+// }
 
-int closestPowerOf2(int n) {
+int closestPowerOf2(int n)
+{
+    // Find the power of 2 that is closest to n
     int lower = std::pow(2, std::floor(std::log2(n)));
     int upper = std::pow(2, std::ceil(std::log2(n)));
 
-    if (n - lower < upper - n) {
+    // Return the closest one
+    if (n - lower < upper - n)
+    {
         return lower;
-    } else {
+    }
+    else
+    {
         return upper;
     }
 }
@@ -63,7 +82,7 @@ int closestPowerOf2(int n) {
 void CACHE::update_partition_sizes(CACHE *cache)
 {
     total_count++;
-    if (cache_type == IS_LLC && (((current_core_cycle[0]-last_update_cycle_cpu0) > 5000000) || ((current_core_cycle[1]-last_update_cycle_cpu1) > 5000000)) )
+    if (cache_type == IS_LLC && (((current_core_cycle[0] - last_update_cycle_cpu0) > 5000000) || ((current_core_cycle[1] - last_update_cycle_cpu1) > 5000000)))
     {
         cout << "-----------------------------------UPDATED------------------------------" << endl;
         uint64_t TOTAL_ACCESS_CPU0 = 0;
@@ -81,27 +100,39 @@ void CACHE::update_partition_sizes(CACHE *cache)
 
         uint64_t access_diff_cpu0 = TOTAL_ACCESS_CPU0;
         uint64_t access_diff_cpu1 = TOTAL_ACCESS_CPU1;
-        
-        uint64_t total_access = access_diff_cpu0+access_diff_cpu1;
 
+        uint64_t total_access = access_diff_cpu0 + access_diff_cpu1;
+
+        // int self_eviction_cpu0 = cache->self_eviction[0] - prev_eviction[0];
+        // int self_eviction_cpu1 = cache->self_eviction[1] - prev_eviction[1];
+
+        // cout << "CPU 0 eviction: " << self_eviction_cpu0 << "CPU 1 eviction: " << self_eviction_cpu1 << endl;
+
+        // int total_eviction = self_eviction_cpu0 + self_eviction_cpu1;
+
+        // Adjust partition sizes based on access ratio
         if (total_access > 0)
         {
-            float ratio = (float)access_diff_cpu0/(total_access+ 1e-6);
+            float ratio = (float)access_diff_cpu0 / (total_access + 1e-6);
             partition_size_cpu0 = std::round(ratio * NUM_SET);
             partition_size_cpu0 = closestPowerOf2(partition_size_cpu0);
             if (partition_size_cpu0 < 1)
-                partition_size_cpu0 = 1;
+                partition_size_cpu0 = 1; // Minimum 1 set
             if (partition_size_cpu0 > NUM_SET - 1)
-                partition_size_cpu0 = NUM_SET - 1; 
+                partition_size_cpu0 = NUM_SET - 1; // Maximum
         }
         else
         {
-            partition_size_cpu0 = NUM_SET / 2; 
+            partition_size_cpu0 = NUM_SET / 2; // Default to equal split if no accesses
         }
         partition_size_cpu1 = NUM_SET - partition_size_cpu0;
         partition_start_cpu0 = 0;
         partition_start_cpu1 = partition_size_cpu0;
 
+        // prev_eviction[0] = cache->self_eviction[0];
+        // prev_eviction[1] = cache->self_eviction[1];
+        // prev_accesses[0] = TOTAL_ACCESS_CPU0;
+        // prev_accesses[1] = TOTAL_ACCESS_CPU1;
         last_update_cycle_cpu0 = current_core_cycle[0];
         last_update_cycle_cpu1 = current_core_cycle[1];
         cout << "CPU 0: " << partition_size_cpu0 << "CPU 1: " << partition_size_cpu1 << endl;
@@ -2918,24 +2949,23 @@ void CACHE::operate()
     // {
     //     update_partition_sizes(&uncore.LLC); // Update partitions dynamically
     // }
-    if (cache_type == IS_LLC && ceaser){
+    if (cache_type == IS_LLC && ceaser)
+    {
         uint64_t total_llc_accesses = 0;
 
-        for (int cpu = 0; cpu < NUM_CPUS; ++cpu) {
-            for (int type = 0; type < NUM_TYPES; ++type) {
+        for (int cpu = 0; cpu < NUM_CPUS; ++cpu)
+        {
+            for (int type = 0; type < NUM_TYPES; ++type)
+            {
                 total_llc_accesses += sim_access[cpu][type];
             }
         }
         ceaser->rekey_one_set(&uncore.LLC, total_llc_accesses);
     }
 
-        
-        
-
     handle_fill();
     handle_writeback();
     reads_available_this_cycle = MAX_READ;
-    
 
     // if (cache_type == IS_LLC && ooo_cpu[0].num_retired>= 10000000 && count<1)
     // {
@@ -2957,7 +2987,6 @@ void CACHE::operate()
         cout << PQ.entry[PQ.head];
         assert(0);
     }
-
 }
 
 /*********************************************** GET SET *************************************************** */
@@ -2972,29 +3001,33 @@ void CACHE::operate()
 //     return (uint32_t)(address & ((1 << lg2(NUM_SET)) - 1));
 // }
 
-uint32_t CACHE::get_set(uint64_t address) {
-    #ifdef PUSH_DTLB_PB
-        if (cache_type == IS_DTLB_PB)
-            return 0;
-        else
-    #endif
+uint32_t CACHE::get_set(uint64_t address)
+{
+#ifdef PUSH_DTLB_PB
+    if (cache_type == IS_DTLB_PB)
+        return 0;
+    else
+#endif
+    {
+        if (cache_type == IS_LLC && ceaser)
         {
-            if (cache_type == IS_LLC && ceaser) {
-                uint64_t encrypted_addr = ceaser_encrypt_address(address);
-                uint32_t set = (uint32_t)(encrypted_addr & ((1 << lg2(NUM_SET)) - 1));
-                // std::cout << "[CEASER][GET_SET] Addr: 0x" << std::hex << address
-                //       << " | EncryptedAddr: 0x" << encrypted_addr
-                //       << " | NUM_SET: " << std::dec << NUM_SET
-                //       << " | Set Index: " << set
-                //       << " | Cycle: " << current_core_cycle[cpu]
-                //       << std::endl;
-                return set;
-            } else {
-                return (uint32_t)(address & ((1 << lg2(NUM_SET)) - 1));
-            }
+            uint64_t encrypted_addr = ceaser_encrypt_address(address);
+            uint32_t set = (uint32_t)(encrypted_addr & ((1 << lg2(NUM_SET)) - 1));
+
+            // std::cout << "[CEASER][GET_SET] Addr: 0x" << std::hex << address
+            //           << " | EncryptedAddr: 0x" << encrypted_addr
+            //           << " | NUM_SET: " << std::dec << NUM_SET
+            //           << " | Set Index: " << set
+            //           << " | Cycle: " << current_core_cycle[cpu]
+            //           << std::endl;
+            return set;
+        }
+        else
+        {
+            return (uint32_t)(address & ((1 << lg2(NUM_SET)) - 1));
         }
     }
-    
+}
 
 uint32_t CACHE::get_set_edited_task2b(uint64_t address, uint32_t cpu)
 {
@@ -3003,14 +3036,16 @@ uint32_t CACHE::get_set_edited_task2b(uint64_t address, uint32_t cpu)
         // Select partition size and start based on CPU
         uint32_t partition_size = (cpu == 0) ? partition_size_cpu0 : partition_size_cpu1;
         uint32_t partition_start = (cpu == 0) ? partition_start_cpu0 : partition_start_cpu1;
-        
+
+        // Calculate set index using bitwise AND, similar to get_set_edited
         uint64_t lower_bits = (uint32_t)((address) & ((1 << lg2(NUM_SET)) - 1));
         uint32_t modulo_set = lower_bits % partition_size;
-        
-        return (partition_start+modulo_set);
+
+        return (partition_start + modulo_set);
     }
     else
     {
+        // Match get_set_edited's non-LLC behavior
 #ifdef PUSH_DTLB_PB
         if (cache_type == IS_DTLB_PB)
             return 0;
@@ -3039,15 +3074,28 @@ uint32_t CACHE::get_set_edited(uint64_t address, uint32_t cpu)
     }
 }
 
-uint32_t CACHE::get_way(uint64_t address, uint32_t set) {
-        for (uint32_t way = 0; way < NUM_WAY; ++way) {
-            if (block[set][way].valid && block[set][way].tag == address)
-                return way;
-        }
-        return NUM_WAY;
+/***************************************** GET WAY ************************************************** */
 
+// uint32_t CACHE::get_way(uint64_t address, uint32_t set)
+// {
+//     for (uint32_t way = 0; way < NUM_WAY; way++)
+//     {
+//         if (block[set][way].valid && (block[set][way].tag == address))
+//             return way;
+//     }
+
+//     return NUM_WAY;
+// }
+
+uint32_t CACHE::get_way(uint64_t address, uint32_t set)
+{
+    for (uint32_t way = 0; way < NUM_WAY; ++way)
+    {
+        if (block[set][way].valid && block[set][way].tag == address)
+            return way;
+    }
+    return NUM_WAY;
 }
-
 
 void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 {
@@ -3154,25 +3202,38 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
     block[set][way].signature = packet->signature;
     block[set][way].confidence = packet->confidence;
 
-    if (cache_type == IS_LLC && ceaser) {
+    if (cache_type == IS_LLC && ceaser)
+    {
         uint8_t eid = ceaser->get_epoch_for_set(set);
         uint64_t enc_tag = ceaser->get_key_for_set(set).feistel_encrypt(packet->address);
-    
+
         block[set][way].encrypted_tag = enc_tag;
         block[set][way].epoch_id = eid;
+
+        for (int c = 0; c < 2; ++c)
+        {
+            block[set][way].first_access[c] = false;
+        }
     }
-    
-    
+
     block[set][way].tag = packet->address; //@Vishal: packet->address will be physical address for L1I, as it is only filled on a miss.
-    
-    
+
     block[set][way].address = packet->address;
     block[set][way].full_addr = packet->full_addr;
+    // std::cout << "[CEASER][ADDR] Cycle: " << current_core_cycle[cpu]
+    //           << " | Addr: 0x" << std::hex << packet->address
+    //           << " | Bits Used: " << std::dec << (64 - __builtin_clzll(packet->address)) << " bits"
+    //           << std::endl;
+
+    // std::cout << "[CEASER][FULLADDR] Cycle: " << current_core_cycle[cpu]
+    //           << " | Addr: 0x" << std::hex << packet->full_addr
+    //           << " | Bits Used: " << std::dec << (64 - __builtin_clzll(packet->full_addr)) << " bits"
+    //           << std::endl;
     block[set][way].data = packet->data;
     block[set][way].cpu = packet->cpu;
     block[set][way].instr_id = packet->instr_id;
 
-    // CEASER debug log for testing
+    // ✅ CEASER debug log for testing
     // if (cache_type == IS_LLC && ceaser && warmup_complete[packet->cpu]) {
     //     std::cout << "[CEASER][FILL] Cycle: " << current_core_cycle[cpu]
     //             << " | Addr: 0x" << std::hex << packet->address
@@ -3183,7 +3244,6 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
     //             << std::endl;
     // }
 
-
     DP(if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " set: " << set << " way: " << way;
                     cout << " lru: " << block[set][way].lru << " tag: " << hex << block[set][way].tag << " full_addr: " << block[set][way].full_addr;
@@ -3192,61 +3252,92 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 
 int CACHE::check_hit(PACKET *packet)
 {
-        // Standard cache logic
-        uint32_t set = get_set(packet->address);
-        int match_way = -1;
+    // Standard cache logic
+    uint32_t set = get_set(packet->address);
+    int match_way = -1;
 
-        if (set >= NUM_SET) {
-            cerr << "[" << NAME << "_ERROR] " << __func__ << " invalid set index: " << set << " NUM_SET: " << NUM_SET;
-            cerr << " address: " << hex << packet->address << " full_addr: " << packet->full_addr << dec;
-            cerr << " event: " << packet->event_cycle << endl;
-            assert(0);
-        }
-
-        uint64_t packet_tag;
-        if (cache_type == IS_L1I || cache_type == IS_L1D) {
-            assert(packet->full_physical_address != 0);
-            packet_tag = packet->full_physical_address >> LOG2_BLOCK_SIZE;
-        } else {
-            packet_tag = packet->address;
-        }
-
-        for (uint32_t way = 0; way < NUM_WAY; way++) {
-            //For CEASER
-            if (cache_type == IS_LLC && ceaser) {
-                uint8_t eid;
-                uint64_t enc_tag = ceaser_encrypt_address_with_eid(packet->address, eid);
-        
-                if (block[set][way].encrypted_tag == enc_tag &&
-                    block[set][way].epoch_id == eid) {
-                    match_way = way;
-        
-                    DP(if (warmup_complete[packet->cpu]) {
-                        cout << "[" << NAME << "][CEASER][HIT] instr_id: " << packet->instr_id
-                             << " addr: 0x" << hex << packet->address
-                             << " | EncTag: 0x" << enc_tag << " | Epoch: " << +eid
-                             << " | Set: " << dec << set << " | Way: " << way << endl;
-                    });
-                    break;
-                }
-            }else{
-                if (block[set][way].valid && (block[set][way].tag == packet_tag)) {
-                    match_way = way;
-                    DP(if (warmup_complete[packet->cpu]) {
-                        cout << "[" << NAME << "] " << __func__ << " instr_id: " << packet->instr_id << " type: " << +packet->type << hex
-                             << " addr: " << packet->address << " full_addr: " << packet->full_addr << " tag: " << block[set][way].tag << dec
-                             << " set: " << set << " way: " << way << " lru: " << block[set][way].lru
-                             << " event: " << packet->event_cycle << " cycle: " << current_core_cycle[packet->cpu] << endl;
-                    });
-                    break;
-                }
-            }
-            
-        }
-
-        return match_way;
+    if (set >= NUM_SET)
+    {
+        cerr << "[" << NAME << "_ERROR] " << __func__ << " invalid set index: " << set << " NUM_SET: " << NUM_SET;
+        cerr << " address: " << hex << packet->address << " full_addr: " << packet->full_addr << dec;
+        cerr << " event: " << packet->event_cycle << endl;
+        assert(0);
     }
 
+    uint64_t packet_tag;
+    if (cache_type == IS_L1I || cache_type == IS_L1D)
+    {
+        assert(packet->full_physical_address != 0);
+        packet_tag = packet->full_physical_address >> LOG2_BLOCK_SIZE;
+    }
+    else
+    {
+        packet_tag = packet->address;
+    }
+
+    for (uint32_t way = 0; way < NUM_WAY; way++)
+    {
+
+        if (cache_type == IS_LLC && ceaser)
+        {
+            uint8_t eid;
+            uint64_t enc_tag = ceaser_encrypt_address_with_eid(packet->address, eid);
+
+            if (block[set][way].encrypted_tag == enc_tag &&
+                block[set][way].epoch_id == eid)
+            {
+
+                int cpu = packet->cpu;
+                // Functional: first access must miss
+                if (block[set][way].first_access[cpu] == false && match_way != -1)
+                {
+                    std::cerr << "[FTM ERROR] First access from core " << cpu
+                              << " wrongly treated as a hit on addr 0x" << std::hex << block[set][way].address << std::dec
+                              << " (Set: " << set << ", Way: " << way << ")\n";
+                    assert(false && "FTM ERROR: first access should miss");
+                }
+
+                if (!block[set][way].first_access[cpu])
+                {
+                    // First access by this core → force miss
+                    block[set][way].first_access[cpu] = true;
+                    DP(if (warmup_complete[cpu]) {
+                        cout << "[" << NAME << "][FTM] Core " << cpu
+                             << " first hit on set " << set << " way " << way
+                             << " addr 0x" << hex << packet->address << dec
+                             << " → MISS\n";
+                    });
+                    return -1;
+                }
+                match_way = way;
+
+                DP(if (warmup_complete[packet->cpu]) {
+                    cout << "[" << NAME << "][CEASER][HIT] instr_id: " << packet->instr_id
+                         << " addr: 0x" << hex << packet->address
+                         << " | EncTag: 0x" << enc_tag << " | Epoch: " << +eid
+                         << " | Set: " << dec << set << " | Way: " << way << endl;
+                });
+                break;
+            }
+        }
+        else
+        {
+            if (block[set][way].valid && (block[set][way].tag == packet_tag))
+            {
+                match_way = way;
+                DP(if (warmup_complete[packet->cpu]) {
+                    cout << "[" << NAME << "] " << __func__ << " instr_id: " << packet->instr_id << " type: " << +packet->type << hex
+                         << " addr: " << packet->address << " full_addr: " << packet->full_addr << " tag: " << block[set][way].tag << dec
+                         << " set: " << set << " way: " << way << " lru: " << block[set][way].lru
+                         << " event: " << packet->event_cycle << " cycle: " << current_core_cycle[packet->cpu] << endl;
+                });
+                break;
+            }
+        }
+    }
+
+    return match_way;
+}
 
 int CACHE::invalidate_entry(uint64_t inval_addr)
 {
@@ -4530,7 +4621,8 @@ void CACHE::increment_WQ_FULL(uint64_t address)
     WQ.FULL++;
 }
 
-uint64_t CACHE::ceaser_encrypt_address(uint64_t address) {
+uint64_t CACHE::ceaser_encrypt_address(uint64_t address)
+{
     if (cache_type != IS_LLC || !ceaser)
         return address;
 
@@ -4538,65 +4630,62 @@ uint64_t CACHE::ceaser_encrypt_address(uint64_t address) {
     return ceaser->get_key_for_set(set).feistel_encrypt(address);
 }
 
-uint64_t CACHE::ceaser_encrypt_address_with_eid(uint64_t address, uint8_t &eid) {
-    if (cache_type != IS_LLC || !ceaser) {
+uint64_t CACHE::ceaser_encrypt_address_with_eid(uint64_t address, uint8_t &eid)
+{
+    if (cache_type != IS_LLC || !ceaser)
+    {
         eid = 0;
         return address;
     }
+
     uint32_t set = address & (NUM_SET - 1);
     eid = ceaser->get_epoch_for_set(set);
     return ceaser->get_key_for_set(set).feistel_encrypt(address);
 }
 
+#include <unordered_set>
 
-void CEASERController::rekey_one_set(CACHE* cache, uint64_t current_cycle){
-    if (current_cycle - last_rekey_cycle < rekey_interval) return;
+void CEASERController::rekey_one_set(CACHE *cache, uint64_t current_cycle)
+{
+    if (current_cycle - last_rekey_cycle < rekey_interval)
+        return;
 
     uint32_t old_set = SPtr;
     uint8_t new_epoch = active_epoch ^ 1;
 
-    // std::cout << "[CEASER][REKEY] Rekeying Set " << old_set
-    //           << " → Epoch " << static_cast<int>(new_epoch)
-    //           << " at cycle " << current_cycle << std::endl;
+    std::unordered_set<uint64_t> encrypted_tags_seen;
 
-    for (uint32_t way = 0; way < 16; ++way) {
-        BLOCK& blk = cache->block[old_set][way];
-        if (!blk.valid) continue;
+    for (uint32_t way = 0; way < 16; ++way)
+    {
+        BLOCK &blk = cache->block[old_set][way];
+        if (!blk.valid)
+            continue;
 
-        // Decrypt PLA using current key
         uint64_t pla = currKey.feistel_decrypt(blk.encrypted_tag);
 
-        // std::cout << "[CEASER][MIGRATE] Moving block: Addr=0x" << std::hex << pla
-        //           << " | OldSet=" << std::dec << old_set
-        //           << " → ";
-        // Encrypt with next key
         uint64_t new_encrypted_tag = nextKey.feistel_encrypt(pla);
+
+        // *** DETERMINISM CHECK ***
+        {
+            uint64_t new_encrypted_tag_repeat = nextKey.feistel_encrypt(pla);
+            assert(new_encrypted_tag == new_encrypted_tag_repeat && "CEASER ERROR: feistel_encrypt is non‑deterministic for same key and PLA");
+        }
+        // *** END DETERMINISM CHECK ***
+
         uint32_t new_set = nextKey.get_set_index(new_encrypted_tag, cache->NUM_SET);
 
-        // std::cout << "NewSet=" << new_set
-        //           << " | Way=" << way << std::dec << std::endl;
+        encrypted_tags_seen.insert(new_encrypted_tag);
 
-        // Find victim in new_set
-        uint32_t victim_way = cache->llc_find_victim(blk.cpu, blk.instr_id, new_set, 
-            cache->block[old_set], blk.ip, pla, 0);
+        uint32_t victim_way = cache->llc_find_victim(blk.cpu, blk.instr_id, new_set,
+                                                     cache->block[old_set], blk.ip, pla, 0);
 
+        BLOCK &victim = cache->block[new_set][victim_way];
+        uint64_t victim_pla = (victim.epoch_id == active_epoch)
+                                  ? currKey.feistel_decrypt(victim.encrypted_tag)
+                                  : nextKey.feistel_decrypt(victim.encrypted_tag);
 
+        uint32_t victim_lru = victim.lru;
 
-        BLOCK& victim = cache->block[new_set][victim_way];
-
-        uint64_t victim_pla = (victim.epoch_id == active_epoch) 
-            ? currKey.feistel_decrypt(victim.encrypted_tag)
-            : nextKey.feistel_decrypt(victim.encrypted_tag);
-        
-        // std::cout << "[CEASER][VICTIM] Set=" << new_set
-        //           << " | VictimWay=" << victim_way
-        //           << " | Replacing Addr=0x" << std::hex << victim_pla
-        //           << " | LRU=" << std::dec << victim.lru << std::endl;
-        
-
-        uint32_t victim_lru = cache->block[new_set][victim_way].lru;
-
-        // Migrate block
         cache->block[new_set][victim_way] = blk;
         cache->block[new_set][victim_way].encrypted_tag = new_encrypted_tag;
         cache->block[new_set][victim_way].epoch_id = new_epoch;
@@ -4606,13 +4695,48 @@ void CEASERController::rekey_one_set(CACHE* cache, uint64_t current_cycle){
         blk.valid = 0;
     }
 
+    // ========== ASSERTION CHECKS FOR REMAPPING SANITY ==========
+    assert(!encrypted_tags_seen.empty() && "No blocks were remapped during rekeying, unexpected.");
+
+    bool any_block_moved = false;
+    std::unordered_set<uint32_t> destination_sets;
+
+    for (uint64_t tag : encrypted_tags_seen)
+    {
+        uint32_t new_set = nextKey.get_set_index(tag, cache->NUM_SET);
+        destination_sets.insert(new_set);
+        if (new_set != old_set)
+            any_block_moved = true;
+    }
+
+    assert(any_block_moved && "All blocks remapped to the same set they came from — CEASER not dispersing sets properly.");
+    assert(destination_sets.size() >= 2 && "Insufficient diversity in remapped sets — CEASER may not be randomizing well.");
+
+
     set_epoch[old_set] = new_epoch;
     SPtr = (SPtr + 1) % set_epoch.size();
     last_rekey_cycle = current_cycle;
 
-    if (SPtr == 0) {
+    if (SPtr == 0)
+    {
         active_epoch = new_epoch;
         currKey = nextKey;
         nextKey.generate_keys();
+
+        std::unordered_set<uint64_t> encrypted_tags_global;
+        for (uint32_t set = 0; set < cache->NUM_SET; ++set)
+        {
+            for (uint32_t way = 0; way < 16; ++way)
+            {
+                BLOCK &blk = cache->block[set][way];
+                if (!blk.valid)
+                    continue;
+
+                uint64_t ela_new = nextKey.feistel_encrypt(blk.address);
+
+                bool inserted = encrypted_tags_global.insert(ela_new).second;
+                assert(inserted && "CEASER ERROR: Collision detected in encrypted tags after full rekey!");
+            }
+        }
     }
 }
