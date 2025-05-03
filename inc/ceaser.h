@@ -62,11 +62,9 @@ public:
         return ((uint64_t)L << HALF_BITS) | R;
     }
 
-    // Use mid-bits for set indexing to leverage avalanche effect
     uint32_t get_set_index(uint64_t encrypted_tag, uint32_t num_sets) const
     {
         uint32_t set_bits = log2(num_sets);
-        // Extract middle bits for better entropy distribution
         return (encrypted_tag >> (ADDRESS_BITS / 2 - set_bits / 2)) & (num_sets - 1);
     }
 
@@ -142,7 +140,7 @@ public:
     uint32_t SPtr = 0;
     uint8_t active_epoch = 0;
     uint64_t last_rekey_cycle = 0;
-    uint64_t rekey_interval = 1000;
+    uint64_t rekey_interval = 1600;
 
     std::vector<uint8_t> set_epoch;
 
